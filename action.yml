@@ -1,0 +1,77 @@
+name: "Release Please Autoship"
+description: "Run Release Please, approve and auto-merge the PR"
+
+inputs:
+  target-branch:
+    description: "Target branch for release please"
+    required: true
+  config-file:
+    description: "Path to release-please config file"
+    required: false
+    default: ".github/release-please-config.json"
+  manifest-file:
+    description: "Path to release-please manifest file"
+    required: false
+    default: ".github/.release-please-manifest.json"
+  skip-github-release:
+    description: "Skip creating GitHub release (only create PR)"
+    required: false
+    default: "true"
+  github-app-id:
+    description: "GitHub App ID for auto-merge token"
+    required: true
+  github-app-private-key:
+    description: "GitHub App private key"
+    required: true
+
+outputs:
+  prs_created:
+    description: "Whether PRs were created"
+    value: ${{ steps.release.outputs.prs_created }}
+  pr:
+    description: "PR object as JSON"
+    value: ${{ steps.release.outputs.pr }}
+  pr_number:
+    description: "PR number"
+    value: ${{ steps.pr_number.outputs.number }}
+  release_created:
+    description: "Whether a release was created"
+    value: ${{ steps.release.outputs.release_created }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v2.2.0
+      with:
+        app-id: ${{ inputs.github-app-id }}
+        private-key: ${{ inputs.github-app-private-key }}
+
+    - name: Run Release Please
+      id: release
+      uses: googleapis/release-please-action@v4.4.0
+      with:
+        token: ${{ steps.app-token.outputs.token }}
+        target-branch: ${{ inputs.target-branch }}
+        skip-github-release: ${{ inputs.skip-github-release }}
+        config-file: ${{ inputs.config-file }}
+        manifest-file: ${{ inputs.manifest-file }}
+        skip-labeling: true
+
+    - name: Extract PR number
+      id: pr_number
+      if: ${{ steps.release.outputs.prs_created == 'true' }}
+      shell: bash
+      env:
+        PR_JSON: ${{ steps.release.outputs.pr }}
+      run: |
+        PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+        echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+    - name: Auto-merge release PR
+      if: ${{ steps.release.outputs.prs_created == 'true' }}
+      uses: DevExSweden/approve-and-merge-pr@main
+      with:
+        pr-number: ${{ steps.pr_number.outputs.number }}
+        github-app-token: ${{ steps.app-token.outputs.token }}
